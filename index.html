@@ -1,0 +1,482 @@
+<!doctype html>
+<html>
+<head>
+<title>Hash Miner</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<base target="_blank">
+<style>
+  body, textarea, input, select {
+    font-family: monospace;
+    font-size: 13px;
+  }
+  fieldset {
+    margin: 0;
+    border: #ddd solid 1px;
+  }
+  fieldset > div {
+    margin-top: 0.5em;
+  }
+  .row {
+    margin: 1em 0;
+  }
+  #txtChallenge {
+    width: 300px;
+  }
+  input:invalid {
+    color: red;
+  }
+  #txtDifficulty, select {
+    width: 120px;
+  }
+  #txtDigest em {
+    font-style: normal;
+    color: red;
+  }
+  .icon {
+    display: inline-block;
+    width: 1.2em;
+  }
+  .label {
+    display: inline-block;
+    width: 7em;
+  }
+  #btnUpdate {
+    width: 1.5em;
+    padding: 0;
+  }
+  #sliderCpuNum, #sliderGpuNum {
+    width: 310px;
+  }
+  table {
+    border-collapse: collapse;
+  }
+  table, td, th {
+    border: 1px #f0f0f0 solid;
+    margin: 1em 0;
+  }
+  tr:nth-child(odd) td{
+    background:#f0f0f0;
+  }
+  td, th {
+    padding: 0.3em 0.6em;
+    text-align: right;
+  }
+  th {
+    text-align: center;
+  }
+  td:first-child {
+    text-align: center;
+  }
+  td:last-child {
+    width: 150px;
+  }
+
+  #txtLog {
+    width: 100%;
+    height: 300px;
+    border: none;
+    outline: none;
+  }
+</style>
+</head>
+<body>
+<h2>Hash Miner</h2>
+<span>🏆 SHA256(Challenge || Nonce) = 0000... <i>(bit0 × Difficulty)</i></span>
+<fieldset id="fieldsetInput" class="row" disabled>
+  <legend>Input</legend>
+  <div>
+    <span class="icon">🧩</span>
+    <span class="label">Challenge:</span>
+    <input type="text" id="txtChallenge" maxlength="32" pattern="^[0-9A-Fa-f]{32}$">
+    <button id="btnUpdate">🎲</button>
+  </div>
+  <div>
+    <span class="icon">💪</span>
+    <span class="label">Difficulty:</span>
+    <input type="number" id="txtDifficulty" value="35" min="1" max="64">
+  </div>
+</fieldset>
+<div class="row">
+  <button id="btnStart">▶️ Start</button>
+  <button id="btnStop" disabled>⏹️ Stop</button>
+</div>
+<fieldset class="row">
+  <legend>Output</legend>
+  <div>
+    <span class="icon">🎯</span>
+    <span class="label">Nonce:</span>
+    <span id="txtNonce"></span>
+  </div>
+  <div>
+    <span class="icon">🫆</span>
+    <span class="label">Digest:</span>
+    <span id="txtDigest"></span>
+  </div>
+</fieldset>
+<fieldset class="row">
+  <legend>Config</legend>
+  <div>
+    <span class="icon">⚙️</span>
+    GPU Load:
+    <input type="range" id="sliderGpuNum" min="1" max="100" value="100">
+    <span id="txtGpuNum"></span>%
+  </div>
+  <div>
+    <span class="icon">⚙️</span>
+    CPU Load:
+    <input type="range" id="sliderCpuNum" min="1" max="100" value="70">
+    <span id="txtCpuNum"></span>%
+  </div>
+  <table class="row">
+    <thead>
+      <th>Device</th>
+      <th>Current Speed</th>
+      <th>Hash Searched</th>
+    </thead>
+    <tbody id="tableStatus"></tbody>
+  </table>
+  <div>
+    <span class="icon">🕒</span>
+    <span id="txtTime">-</span>
+  </div>  
+  <div id="batteryBar" hidden>
+    <span class="icon" id="txtBatteryIcon">🔋</span>
+    <span id="txtBatteryLevel"></span>%
+  </div>
+</fieldset>
+<fieldset class="row">
+  <legend>Debug</legend>
+  <div>
+    <span class="icon">🛠️</span>
+    GPU API:
+    <select id="optGpuApi">
+      <option disabled>WebGPU</option>
+      <option disabled>WebGL2</option>
+      <option selected>None</option>
+    </select>
+  </div>
+  <div>
+    <span class="icon">🛠️</span>
+    CPU API:
+    <select id="optCpuApi">
+      <option disabled>Wasm-SIMD</option>
+      <option disabled>Wasm</option>
+      <option selected>asm.js</option>
+    </select>
+  </div>
+</fieldset>
+<fieldset class="row">
+  <legend>Log</legend>
+  <div>
+    <textarea id="txtLog"></textarea>
+  </div>
+</fieldset>
+<script type="module">
+  if (!Uint8Array.prototype.toHex) {
+    await import('https://cdnjs.cloudflare.com/ajax/libs/core-js/3.45.1/minified.js')
+  }
+  import * as miner from './index.js'
+
+  function log(str) {
+    txtLog.value += str + '\n'
+  }
+
+  function lockInputUi() {
+    fieldsetInput.disabled = true
+    btnStart.disabled = true
+    btnStop.disabled = false
+  }
+
+  function unlockInputUi() {
+    fieldsetInput.disabled = false
+    btnStart.disabled = false
+    btnStop.disabled = true
+    clearInterval(timer)
+  }
+
+  let startTime
+  let timer = 0
+
+  const unit = ['', 'k', 'M', 'G']
+
+  function formatUnit(v) {
+    let i = 0;
+    while (v >= 1000 && i < unit.length - 1) {
+      v /= 1000
+      i++
+    }
+    return v.toFixed(1) + ' ' + unit[i]
+  }
+
+  function formatHashSpeed(v) {
+    return formatUnit(v) + 'H/s'
+  }
+
+  function formatTime(ms) {
+    const time = new Date(ms).toISOString().slice(11, 19)
+    const day = ms / 86400000 | 0
+    if (day) {
+      return `${day}day ${time}`
+    }
+    return time
+  }
+
+  const tableRows = []
+
+  const COLUMN_DEV_NAME = 0
+  const COLUMN_CUR_SPD = 1
+  const COLUMN_HASH_NUM = 2
+
+  const ROW_DEV_ALL = 0
+  const ROW_DEV_GPU = 1
+  const ROW_DEV_CPU = 2
+
+  function addTableRow(name) {
+    const row = document.createElement('tr')
+    row.innerHTML = `<td>${name}</td>` + '<td></td>'.repeat(2)
+    tableStatus.appendChild(row)
+
+    tableRows.push([
+      ...row.childNodes
+    ])
+  }
+
+  function setTable(row, col, str) {
+    tableRows[row][col].textContent = str
+  }
+
+  let progressLast
+  const progressDeltaRecent = []
+  const MAX_SECONDS = 3
+
+  function updateProgress() {
+    const progressCurr = miner.progress
+
+    if (!progressLast) {
+      progressLast = progressCurr.concat()
+      return
+    }
+    let totalSpeed = 0
+    let cpuSpeed = 0
+
+    let totalHashNum = 0
+    let cpuHashNum = 0
+
+    progressCurr.forEach((v, i) => {
+      totalHashNum += v
+      const delta = v - progressLast[i]
+
+      const item = progressDeltaRecent[i]
+      if (item.push(delta) > MAX_SECONDS) {
+        item.shift()
+      }
+      const sum = item.reduce((v, s) => v + s)
+      const avg = Math.round(sum / item.length)
+      totalSpeed += avg
+
+      if (i === 0) {
+        setTable(ROW_DEV_GPU, COLUMN_CUR_SPD, formatHashSpeed(avg))
+        setTable(ROW_DEV_GPU, COLUMN_HASH_NUM, v.toLocaleString())
+      } else {
+        setTable(ROW_DEV_CPU + i, COLUMN_CUR_SPD, formatHashSpeed(avg))
+        setTable(ROW_DEV_CPU + i, COLUMN_HASH_NUM, v.toLocaleString())
+        cpuSpeed += avg
+        cpuHashNum += v
+      }
+    })
+
+    // speed
+    setTable(ROW_DEV_ALL, COLUMN_CUR_SPD, formatHashSpeed(totalSpeed))
+    setTable(ROW_DEV_CPU, COLUMN_CUR_SPD, formatHashSpeed(cpuSpeed))
+
+    // hash num
+    setTable(ROW_DEV_ALL, COLUMN_HASH_NUM, totalHashNum.toLocaleString())
+    setTable(ROW_DEV_CPU, COLUMN_HASH_NUM, cpuHashNum.toLocaleString())
+
+    progressLast = progressCurr.concat()
+    txtTime.textContent = formatTime(Date.now() - startTime)
+  }
+
+  miner.events.onComplete = async (nonce) => {
+    const difficulty = +txtDifficulty.value
+    const challengeHex = txtChallenge.value
+    const nonceHex = nonce.toHex()
+
+    const message = Uint8Array.fromHex(challengeHex + nonceHex)
+    const hashBuf = await crypto.subtle.digest('SHA-256', message)
+    const hashU8  = new Uint8Array(hashBuf)
+    const hashU32 = new Uint32Array(hashBuf)
+    const hashHex = hashU8.toHex()
+
+    const prefixHexNum = Math.ceil(difficulty / 4)
+    const prefixHex = hashHex.substring(0, prefixHexNum)
+    const suffixHex = hashHex.substring(prefixHexNum)
+
+    txtNonce.textContent = nonceHex
+    txtDigest.innerHTML = '<em>' + prefixHex + '</em>' + suffixHex
+
+    let prefixHexStr = ''
+    let prefixBinStr = ''
+    let prefixNthStr = ''
+    let i = 1
+
+    for (const v of prefixHex) {
+      prefixNthStr += ' ' + (i++).toString().padStart(4, ' ')
+      prefixHexStr += '    ' + v
+      prefixBinStr += ' ' + parseInt(v, 16).toString(2).padStart(4, '0')
+    }
+
+    const date = new Date().toLocaleTimeString()
+
+    log(`\
+Completed (${date})
+
+Digest:
+${prefixHex} ${suffixHex}
+
+Prefix:
+(hex)${prefixHexStr}
+(bin)${prefixBinStr}
+(nth)${prefixNthStr}
+
+Verify:
+
+\`\`\`javascript
+var challenge = '${challengeHex}'
+var nonce = '${nonceHex}'
+
+var message = Uint8Array.fromHex(challenge + nonce)
+var hashBuf = await crypto.subtle.digest('SHA-256', message)
+var hashHex = new Uint8Array(hashBuf).toHex()
+
+console.log(hashHex.startsWith('${prefixHex}'))
+\`\`\`
+`)
+    unlockInputUi()
+  }
+
+  miner.events.onError = (err) => {
+    log('ERROR: ' + err.message)
+    btnStop.onclick()
+  }
+
+  btnUpdate.onclick = () => {
+    const bin = crypto.getRandomValues(new Uint8Array(16))
+    txtChallenge.value = bin.toHex()
+  }
+
+  btnStart.onclick = () => {
+    miner.progress.forEach((v, i) => {
+      progressDeltaRecent[i] = []
+    })
+    progressLast = null
+    txtNonce.textContent = ''
+    txtDigest.textContent = ''
+    txtTime.textContent = ''
+
+    if (txtChallenge.validity.patternMismatch ||
+      txtDifficulty.validity.rangeOverflow
+    ) {
+      log('invalid input')
+      return
+    }
+
+    const date = new Date().toLocaleTimeString()
+    log(`Mining... (${date})`)
+    lockInputUi()
+
+    const challenge = Uint8Array.fromHex(txtChallenge.value)
+    const difficulty = +txtDifficulty.value
+
+    startTime = Date.now()
+    miner.start(challenge, difficulty)
+    timer = setInterval(updateProgress, 1000)
+  }
+
+  btnStop.onclick = () => {
+    miner.stop()
+    unlockInputUi()
+    log('Stopped')
+  }
+
+  sliderGpuNum.oninput = function() {
+    txtGpuNum.textContent = this.value
+    miner.setGpuLoadRate(this.value / 100)
+  }
+
+  sliderCpuNum.oninput = function() {
+    txtCpuNum.textContent = this.value
+    miner.setCpuLoadRate(this.value / 100)
+  }
+
+  optGpuApi.oninput = function() {
+    miner.setGpuApi(optGpuApi.selectedIndex)
+  }
+
+  optCpuApi.oninput = function() {
+    miner.setCpuApi(optCpuApi.selectedIndex)
+  }
+
+  async function showBattery() {
+    const battery = await navigator.getBattery()
+    const update = () => {
+      if (battery.charging) {
+        batteryBar.hidden = true
+      } else {
+        batteryBar.hidden = false
+        txtBatteryLevel.textContent = battery.level * 100 | 0
+      }
+    }
+    battery.onchargingchange = update
+    battery.onlevelchange = update
+    update()
+  }
+
+  async function main() {
+    txtLog.value = ''
+    addTableRow('*')
+    addTableRow('GPU')
+    addTableRow('CPU')
+
+    for (let i = 1; i <= navigator.hardwareConcurrency; i++) {
+      addTableRow('#' + i)
+    }
+    fieldsetInput.disabled = false
+    btnUpdate.click()
+
+    if (navigator.getBattery) {
+      showBattery()
+    }
+    await miner.init()
+
+    // GPU (WebGPU or WebGL2)
+    if (miner.features.gpu[miner.GpuApi.WEBGL2]) {
+      optGpuApi.options[1].disabled = false
+      optGpuApi.options[1].selected = true
+    }
+    if (miner.features.gpu[miner.GpuApi.WEBGPU]) {
+      optGpuApi.options[0].disabled = false
+      optGpuApi.options[0].selected = true
+    }
+    optGpuApi.oninput()
+
+    // CPU (wasm or asm.js)
+    if (miner.features.cpu[miner.CpuApi.WASM]) {
+      optCpuApi.options[1].disabled = false
+      optCpuApi.options[1].selected = true
+    }
+    if (miner.features.cpu[miner.CpuApi.WASM_SIMD]) {
+      optCpuApi.options[0].disabled = false
+      optCpuApi.options[0].selected = true
+    }
+    optCpuApi.oninput()
+
+    sliderGpuNum.oninput()
+    sliderCpuNum.oninput()
+  }
+  main()
+</script>
+<a href="https://github.com/EtherDream/hash-miner/" class="github-corner" aria-label="View source on GitHub"><svg width="80" height="80" viewBox="0 0 250 250" style="fill:#151513; color:#fff; position: absolute; top: 0; border: 0; right: 0;" aria-hidden="true"><path d="M0,0 L115,115 L130,115 L142,142 L250,250 L250,0 Z"></path><path d="M128.3,109.0 C113.8,99.7 119.0,89.6 119.0,89.6 C122.0,82.7 120.5,78.6 120.5,78.6 C119.2,72.0 123.4,76.3 123.4,76.3 C127.3,80.9 125.5,87.3 125.5,87.3 C122.9,97.6 130.6,101.9 134.4,103.2" fill="currentColor" style="transform-origin: 130px 106px;" class="octo-arm"></path><path d="M115.0,115.0 C114.9,115.1 118.7,116.5 119.8,115.4 L133.7,101.6 C136.9,99.2 139.9,98.4 142.2,98.6 C133.8,88.0 127.5,74.4 143.8,58.0 C148.5,53.4 154.0,51.2 159.7,51.0 C160.3,49.4 163.2,43.6 171.4,40.1 C171.4,40.1 176.1,42.5 178.8,56.2 C183.1,58.6 187.2,61.8 190.9,65.4 C194.5,69.0 197.7,73.2 200.1,77.6 C213.8,80.2 216.3,84.9 216.3,84.9 C212.7,93.1 206.9,96.0 205.4,96.6 C205.1,102.4 203.0,107.8 198.3,112.5 C181.9,128.9 168.3,122.5 157.7,114.1 C157.9,116.9 156.7,120.9 152.7,124.9 L141.0,136.5 C139.8,137.7 141.6,141.9 141.8,141.8 Z" fill="currentColor" class="octo-body"></path></svg></a><style>.github-corner:hover .octo-arm{animation:octocat-wave 560ms ease-in-out}@keyframes octocat-wave{0%,100%{transform:rotate(0)}20%,60%{transform:rotate(-25deg)}40%,80%{transform:rotate(10deg)}}@media (max-width:500px){.github-corner:hover .octo-arm{animation:none}.github-corner .octo-arm{animation:octocat-wave 560ms ease-in-out}}</style>
+</body>
+</html>
