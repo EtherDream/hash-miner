@@ -1,0 +1,6 @@
+node_modules
+.tmp
+*.wasm
+dist/index.js
+dist/index.js.map
+asmjs-tmp.js

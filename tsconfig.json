@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "lib": ["ESNext", "DOM"],
+    "sourceMap": true,
+    "module": "esnext",
+    "types": ["@webgpu/types"],
+    "strict": true
+  },
+  "include": [
+    "src/**/*.ts"
+  ]
+}
