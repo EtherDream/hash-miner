@@ -1,8 +1,10 @@
 #include <stdint.h>
+#include <bit>
 #include "wasm-vec4.h"
 
 using wasm_vec4::u32;
 using wasm_vec4::vec4u;
+using wasm_vec4::vec4b;
 
 
 #define EXPORT        extern "C" __attribute__((used))
@@ -51,27 +53,30 @@ constexpr u32 K[64] = {
 };
 
 
-inline int checkResult(u32 v0, u32 v1, u32 mask0, u32 mask1) {
-  if ((v0 & mask0) == 0 && (v1 & mask1) == 0) {
+inline int checkResult(u32 v0, u32 v1, u32 m0, u32 m1) {
+  if ((v0 & m0) == 0 && (v1 & m1) == 0) {
     return 0;
   }
   return -1;
 }
 
-inline int checkResult(vec4u v0, vec4u v1, u32 mask0, u32 mask1) {
-  if ((v0.x() & mask0) == 0 && (v1.x() & mask1) == 0) {
-    return 0;
+inline int checkResult(vec4u v0, vec4u v1, vec4u m0, vec4u m1) {
+  vec4u t0 = v0 & m0;
+  vec4b c0 = t0 == vec4u(0);
+
+  if (!c0.any()) [[likely]] {
+    return -1;
   }
-  if ((v0.y() & mask0) == 0 && (v1.y() & mask1) == 0) {
-    return 1;
+  vec4u t1 = v1 & m1;
+  vec4u tor = t0 | t1;
+  vec4b c01 = tor == vec4u(0);
+
+  u32 lm4 = c01.bitmask();
+  if (lm4 == 0) [[likely]] {
+    return -1;
   }
-  if ((v0.z() & mask0) == 0 && (v1.z() & mask1) == 0) {
-    return 2;
-  }
-  if ((v0.w() & mask0) == 0 && (v1.w() & mask1) == 0) {
-    return 3;
-  }
-  return -1;
+  int lane = std::countr_zero(lm4);   // 0..3
+  return lane;
 }
 
 
@@ -89,6 +94,9 @@ EXPORT u32 search(
 
   T W[16], S[8];
   T t0, t1;
+
+  T m0 = T(mask0);
+  T m1 = T(mask1);
 
   const u32 w7_end = w7 + step;
 
@@ -150,7 +158,7 @@ EXPORT u32 search(
     int offset = checkResult(
       S[0] + 0x6A09E667,
       S[1] + 0xBB67AE85,
-      mask0, mask1
+      m0, m1
     );
     if (offset >= 0) {
       return w7 + offset;
