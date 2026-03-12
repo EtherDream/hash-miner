@@ -88,13 +88,13 @@
   <div>
     <span class="icon">🧩</span>
     <span class="label">Challenge:</span>
-    <input type="text" id="txtChallenge" maxlength="32" pattern="^[0-9A-Fa-f]{32}$">
+    <input type="text" id="txtChallenge" required maxlength="32" pattern="^[0-9A-Fa-f]{32}$">
     <button id="btnUpdate">🎲</button>
   </div>
   <div>
     <span class="icon">💪</span>
     <span class="label">Difficulty:</span>
-    <input type="number" id="txtDifficulty" value="35" min="1" max="64">
+    <input type="number" id="txtDifficulty" required value="35" min="1" max="64">
   </div>
 </fieldset>
 <div class="row">
@@ -271,7 +271,7 @@
       if (item.push(delta) > MAX_SECONDS) {
         item.shift()
       }
-      const sum = item.reduce((v, s) => v + s)
+      const sum = item.reduce((s, v) => s + v, 0)
       const avg = Math.round(sum / item.length)
       totalSpeed += avg
 
@@ -306,7 +306,6 @@
     const message = Uint8Array.fromHex(challengeHex + nonceHex)
     const hashBuf = await crypto.subtle.digest('SHA-256', message)
     const hashU8  = new Uint8Array(hashBuf)
-    const hashU32 = new Uint32Array(hashBuf)
     const hashHex = hashU8.toHex()
 
     const prefixHexNum = Math.ceil(difficulty / 4)
@@ -375,8 +374,8 @@ console.log(hashHex.startsWith('${prefixHex}'))
     txtDigest.textContent = ''
     txtTime.textContent = ''
 
-    if (txtChallenge.validity.patternMismatch ||
-      txtDifficulty.validity.rangeOverflow
+    if (!txtChallenge.validity.valid ||
+        !txtDifficulty.validity.valid
     ) {
       log('invalid input')
       return
