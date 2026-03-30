@@ -36,7 +36,9 @@ This version fixes those issues, allowing the WebGL2 backend to reach WebGPU-lev
 
 - [`webgpu.wgsl`](src/assets/webgpu.wgsl)
 
-The Wasm binaries are not checked into the repository. Generate them with:
+The Wasm source code is located in [sha256.cpp](sha256.cpp). The SIMD version utilizes [wasm-vec4.h](wasm-vec4.h), which encapsulates vector operations in WGSL-style.
+
+To recompile the Wasm files, execute the following command:
 
 ```bash
 ./build-wasm.sh

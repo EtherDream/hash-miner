@@ -219,14 +219,14 @@ export function setLoadRate(rate: number) {
 }
 
 function onWorkerMsg(this: Worker, e: MessageEvent) {
-  const msg: ResMsg = e.data
+  const $: ResMsg = e.data
 
-  switch (msg.type) {
+  switch ($.type) {
     case ResMsgType.PROGRESS:
-    events.onProgress!(msg.step, this.id)
+    events.onProgress!($.step, this.id)
     break
   case ResMsgType.COMPLETE:
-    events.onComplete!(msg.nonce)
+    events.onComplete!($.nonce)
     break
   }
 }
